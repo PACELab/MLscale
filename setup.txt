@@ -1,0 +1,93 @@
+##HTTPerf VM
+edit the /etc/hosts and /etc/hostname file for convenience (naming), add loadbalancer ip address to /etc/hosts
+reboot
+sudo apt-get install cmake gcc
+untar the custom httperf.tar.gz, cd, make
+run experiments
+
+use expGen.py or traceExpGen.py to generate experiment commands
+
+##Load Balancer VM
+edit the /etc/hosts and /etc/hostname file for convenience (naming)
+uncomment the a2enmod line in workersetup.sh and execute it
+
+Configuration file changes:
+
+apache2.conf : /etc/apache2/apache2.conf
+add the worker VMs like this
+<Proxy balancer://mybalancer> 
+BalancerMember http://10.2.10.49
+BalancerMember http://10.2.10.48
+BalancerMember http://10.2.10.47
+BalancerMember http://10.2.10.46
+BalancerMember http://10.2.10.45
+</Proxy>
+
+ProxyPass /balancer-manager !
+        ProxyPass / balancer://mybalancer/
+
+Set access control, change IPs as required
+load balancer needs to be access from Httperf, may be from your local machine if you want to see the manager UI, 
+and from the worker VM running scaling script
+<Location /balancer-manager>
+SetHandler balancer-manager
+Order Deny,Allow
+Deny from all
+Allow from 130.245.246.151/24
+</Location>
+
+<Location />
+Order Deny,Allow
+Deny from all
+Allow from 130.245.246.151/24 10.2.10.50/24 130.245.183.172/16
+</Location>
+
+/etc/apache2/mods-enabled/mpm_prefork.conf
+change the values to this:
+<IfModule mpm_prefork_module>
+        StartServers                     100
+        MinSpareServers           20
+        MaxSpareServers          100
+        MaxRequestWorkers         150
+        MaxConnectionsPerChild   0
+</IfModule>
+
+add %D to log format in first three formats (optional for load balancer/ depends if you want to use the RT values from LB or worker)
+service apache2 restart
+verify that the VMs are able to access the load balancer
+
+
+## Scaling worker VM
+uncomment lines in workersetup.sh 
+change hostname and /etc/hosts file if needed
+
+configuration file changes:
+apache2.conf 
+
+%D in log format
+LogFormat "%v:%p %h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %D" vhost_combined
+LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %D" combined
+LogFormat "%h %l %u %t \"%r\" %>s %O %D" common
+
+access control, allow only from load balancer
+<Location />
+Order Deny,Allow
+Deny from all
+Allow from 130.245.168.70
+</Location>
+
+mpm_prefork.conf
+change the file same as the load balancer
+
+Files on this VM:
+nn.py		used for training neural network
+naivescale.py	naive scaling policy - make sure to update IPs, nonce
+tensecscale.py	uses learned model (specified) to issue scaling directives
+
+scaling scripts need collectl utility running in parallel (use tmux) and dumping metrics in stat file
+
+## Worker VM
+Use the normal workersetup.sh
+change /etc/hostname and /etc/hosts file if needed
+
+Change the apache2.conf and mpm_prefork.conf files same as above
